@@ -181,60 +181,99 @@ if st.button("Generate Chart"):
                 date_range.append(current_date)
             current_date += timedelta(days=1)
 
-        data = []
-        faculty_index = 0
-        sr_no = 1
+        total_slots = len(date_range) * len(time_slots)
+        num_faculty = len(faculty_list)
         
-        # Create supervision chart - one row per date per supervisor per slot
+        # Determine how many faculty per slot needed to use all faculty
+        faculty_per_slot = max(1, (num_faculty + total_slots - 1) // total_slots)  # Ceiling division
+        
+        # Create assignment mapping: {faculty_name: {(date, slot_idx): True}}
+        faculty_assignments = {}
+        faculty_index = 0
+        
+        # Assign faculty to slots
         for day_idx, exam_date in enumerate(date_range):
             for slot_idx, slot in enumerate(time_slots):
-                # Determine if slot is Morning (M) or Evening (E)
-                is_morning = slot_idx < morning_blocks
-                period = "M" if is_morning else "E"
-                
-                # Assign faculty in rotation
-                assigned_faculty = faculty_list[faculty_index % len(faculty_list)]
-                
-                # Build row with all time slots
-                row = {
-                    "Sr. No.": sr_no,
-                    "Supervisor Name": assigned_faculty,
-                    "Date": exam_date.strftime("%d-%m-%Y"),
-                    "M/E": period
-                }
-                
-                # Add tick marks for each time slot
-                for ts_idx, ts in enumerate(time_slots):
-                    if ts_idx == slot_idx:
-                        row[ts] = "✓"
+                for fp in range(faculty_per_slot):
+                    if faculty_index < num_faculty:
+                        assigned_faculty = faculty_list[faculty_index]
+                        if assigned_faculty not in faculty_assignments:
+                            faculty_assignments[assigned_faculty] = {}
+                        faculty_assignments[assigned_faculty][(exam_date, slot_idx)] = True
+                        faculty_index += 1
+        
+        # Create one row per faculty with all assignment slots
+        data = []
+        for sr, faculty_name in enumerate(faculty_list, 1):
+            row = {
+                "Sr. No.": sr,
+                "Supervisor Name": faculty_name
+            }
+            
+            # Add columns for each date-slot combination
+            for exam_date in date_range:
+                for slot_idx, slot in enumerate(time_slots):
+                    is_morning = slot_idx < morning_blocks
+                    period = "M" if is_morning else "E"
+                    
+                    # Create column name with date, M/E, and slot timing
+                    col_name = f"{exam_date.strftime('%d-%m-%Y')}_{period}_{slot}"
+                    
+                    # Check assignment
+                    if faculty_name in faculty_assignments and (exam_date, slot_idx) in faculty_assignments[faculty_name]:
+                        row[col_name] = "✓"
                     else:
-                        row[ts] = ""
-                
-                sr_no += 1
-                faculty_index += 1
-                data.append(row)
-
+                        row[col_name] = ""
+            
+            data.append(row)
+        
+        # Create dataframe with wide format (one row per faculty)
         df = pd.DataFrame(data)
 
-        # Reorder columns: Sr. No., Supervisor Name, Date, M/E, then time slots
-        column_order = ["Sr. No.", "Supervisor Name", "Date", "M/E"]
-        column_order.extend(time_slots)
-        df = df[column_order]
-
         st.subheader(f"Supervision Chart ({exam_start_date.strftime('%d-%m-%Y')} to {exam_end_date.strftime('%d-%m-%Y')})")
-        excluded = len(date_range) - sum(1 for d in date_range if d not in holidays)
         total_exam_days = (exam_end_date - exam_start_date).days + 1
-        st.write(f"**Total Days in Range:** {total_exam_days} | **Exam Days (after excluding {len(holidays)} holidays):** {len(date_range)} | **Time Slots/Day:** {len(time_slots)} | **Morning Blocks:** {morning_blocks} | **Evening Blocks:** {evening_blocks}")
+        st.write(f"**Total Days in Range:** {total_exam_days} | **Exam Days (after excluding {len(holidays)} holidays):** {len(date_range)} | **Time Slots/Day:** {len(time_slots)} | **Total Supervision Slots:** {total_slots}")
+        st.write(f"**Total Faculty:** {num_faculty} | **Faculty per Slot:** {faculty_per_slot} | **Faculty Allocated:** {faculty_index}")
         st.dataframe(df, use_container_width=True)
 
-        # CSV Download with Headers
+        # Prepare data for exports with custom headers
+        # Build multi-row header structure
+        header_row1 = ["Sr. No.", "Supervisor Name"]
+        header_row2 = ["", ""]
+        header_row3 = ["", ""]
+        
+        for exam_date in date_range:
+            date_str = exam_date.strftime("%d-%m-%Y")
+            # Morning columns
+            for slot_idx in range(morning_blocks):
+                header_row1.append(date_str)
+                header_row2.append("M")
+                header_row3.append(time_slots[slot_idx])
+            # Evening columns
+            for slot_idx in range(morning_blocks, len(time_slots)):
+                header_row1.append(date_str)
+                header_row2.append("E")
+                header_row3.append(time_slots[slot_idx])
+        
+        # Build CSV with multi-row headers
         csv_buffer = io.StringIO()
         csv_buffer.write("VVP Institute of engineering and Technology, Solapur\n")
         csv_buffer.write("Internal Supervision Chart\n")
         csv_buffer.write(f"Period: {exam_start_date.strftime('%d-%m-%Y')} to {exam_end_date.strftime('%d-%m-%Y')}\n")
-        csv_buffer.write(f"Morning Blocks: {morning_blocks} | Evening Blocks: {evening_blocks}\n")
-        csv_buffer.write("\n")
-        csv_buffer.write(df.to_csv(index=False, encoding='utf-8'))
+        csv_buffer.write(f"Morning Blocks: {morning_blocks} | Evening Blocks: {evening_blocks}\n\n")
+        
+        # Write multi-row headers
+        csv_buffer.write(",".join(str(h) for h in header_row1) + "\n")
+        csv_buffer.write(",".join(str(h) for h in header_row2) + "\n")
+        csv_buffer.write(",".join(str(h) for h in header_row3) + "\n")
+        
+        # Write data rows
+        for idx, row in df.iterrows():
+            row_values = [str(row["Sr. No."]), row["Supervisor Name"]]
+            for col in df.columns[2:]:  # Skip Sr. No. and Supervisor Name
+                row_values.append(row[col])
+            csv_buffer.write(",".join(row_values) + "\n")
+        
         csv_content = csv_buffer.getvalue()
         
         st.download_button(
@@ -244,7 +283,7 @@ if st.button("Generate Chart"):
             mime="text/csv"
         )
 
-        # Word Download
+        # Word Download with multi-row headers
         doc = Document()
         doc.add_heading("VVP Institute of engineering and Technology, Solapur", 0)
         doc.add_heading("Internal Supervision Chart", level=1)
@@ -252,15 +291,30 @@ if st.button("Generate Chart"):
         doc.add_paragraph(f"Morning Blocks: {morning_blocks} | Evening Blocks: {evening_blocks}")
         doc.add_paragraph("")
 
-        table = doc.add_table(rows=len(df)+1, cols=len(df.columns))
+        num_cols = len(df.columns)
+        table = doc.add_table(rows=len(df)+3, cols=num_cols)
         table.style = 'Light Grid Accent 1'
 
-        for j, col in enumerate(df.columns):
-            table.rows[0].cells[j].text = col
+        # Add header row 1 (Dates and merged Sr.No./Supervisor Name)
+        for j, header_val in enumerate(header_row1):
+            table.rows[0].cells[j].text = header_val
+        
+        # Add header row 2 (M/E)
+        for j, header_val in enumerate(header_row2):
+            table.rows[1].cells[j].text = header_val
+        
+        # Add header row 3 (Time slots)
+        for j, header_val in enumerate(header_row3):
+            table.rows[2].cells[j].text = header_val
 
+        # Add data rows
         for i in range(len(df)):
-            for j in range(len(df.columns)):
-                table.rows[i+1].cells[j].text = str(df.iloc[i, j])
+            for j in range(num_cols):
+                if j < 2:
+                    table.rows[i+3].cells[j].text = str(df.iloc[i, j])
+                else:
+                    col_name = df.columns[j]
+                    table.rows[i+3].cells[j].text = str(df.iloc[i, j])
 
         # Save Word to bytes buffer
         doc_buffer = io.BytesIO()
@@ -274,7 +328,7 @@ if st.button("Generate Chart"):
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
 
-        # PDF Download
+        # PDF Download with multi-row headers
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", "B", size=14)
@@ -292,22 +346,36 @@ if st.button("Generate Chart"):
         for col in df_pdf.columns:
             df_pdf[col] = df_pdf[col].astype(str).str.replace('✓', 'X')
 
-        # Add table headers
+        # Calculate column width
         col_width = pdf.w / len(df_pdf.columns)
-        for col in df_pdf.columns:
-            pdf.cell(col_width, 8, str(col)[:15], border=1, align="C")
+        
+        # Add header row 1 (Dates)
+        pdf.set_font("Arial", "B", size=9)
+        for header_val in header_row1:
+            pdf.cell(col_width, 6, str(header_val)[:12], border=1, align="C")
+        pdf.ln()
+        
+        # Add header row 2 (M/E)
+        for header_val in header_row2:
+            pdf.cell(col_width, 6, str(header_val)[:12], border=1, align="C")
+        pdf.ln()
+        
+        # Add header row 3 (Time slots)
+        for header_val in header_row3:
+            pdf.cell(col_width, 6, str(header_val)[:12], border=1, align="C")
         pdf.ln()
 
         # Add table data
+        pdf.set_font("Arial", size=9)
         for i in range(len(df_pdf)):
             for j in range(len(df_pdf.columns)):
-                cell_value = str(df_pdf.iloc[i, j])[:15]
+                cell_value = str(df_pdf.iloc[i, j])[:12]
                 # Ensure all characters are latin-1 compatible
                 try:
                     cell_value.encode('latin-1')
                 except UnicodeEncodeError:
                     cell_value = '?'
-                pdf.cell(col_width, 8, cell_value, border=1, align="C")
+                pdf.cell(col_width, 6, cell_value, border=1, align="C")
             pdf.ln()
 
         # Save PDF to bytes buffer - use output() without arguments to get bytes
