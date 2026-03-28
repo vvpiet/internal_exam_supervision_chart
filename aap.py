@@ -2,8 +2,10 @@ import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
 from docx import Document
-from docx.shared import Pt, RGBColor, Inches
-from fpdf import FPDF
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
 import io
 import os
 
@@ -328,62 +330,73 @@ if st.button("Generate Chart"):
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
 
-        # PDF Download with multi-row headers
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", "B", size=14)
-        pdf.cell(0, 8, "VVP Institute of engineering and Technology, Solapur", ln=True, align="C")
-        pdf.set_font("Arial", "B", size=12)
-        pdf.cell(0, 8, "Internal Supervision Chart", ln=True, align="C")
-        pdf.set_font("Arial", size=10)
-        pdf.cell(0, 8, f"Period: {exam_start_date.strftime('%d-%m-%Y')} to {exam_end_date.strftime('%d-%m-%Y')}", ln=True)
-        pdf.cell(0, 8, f"Morning Blocks: {morning_blocks} | Evening Blocks: {evening_blocks}", ln=True)
-        pdf.ln(5)
-
-        # Create a copy of dataframe with tick marks replaced for PDF compatibility
+        # PDF Download with multi-row headers using reportlab
+        pdf_buffer = io.BytesIO()
+        doc = SimpleDocTemplate(pdf_buffer, pagesize=A4, topMargin=0.5*inch, bottomMargin=0.5*inch, leftMargin=0.3*inch, rightMargin=0.3*inch)
+        story = []
+        
+        # Styles
+        style = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=style['Heading1'],
+            fontSize=14,
+            textColor='#1e3c72',
+            spaceAfter=6,
+            alignment=1  # CENTER
+        )
+        subtitle_style = ParagraphStyle(
+            'CustomSubtitle',
+            parent=style['Heading2'],
+            fontSize=12,
+            textColor='#2a5298',
+            spaceAfter=4,
+            alignment=1  # CENTER
+        )
+        
+        # Add titles
+        story.append(Paragraph("VVP Institute of Engineering and Technology, Solapur", title_style))
+        story.append(Paragraph("Internal Supervision Chart", subtitle_style))
+        story.append(Paragraph(f"Period: {exam_start_date.strftime('%d-%m-%Y')} to {exam_end_date.strftime('%d-%m-%Y')}", style['Normal']))
+        story.append(Paragraph(f"Morning Blocks: {morning_blocks} | Evening Blocks: {evening_blocks}", style['Normal']))
+        story.append(Spacer(1, 0.2*inch))
+        
+        # Create table data
         df_pdf = df.copy()
-        # Replace tick marks with 'X' for PDF export (latin-1 compatibility)
+        # Replace tick marks with 'X' 
         for col in df_pdf.columns:
             df_pdf[col] = df_pdf[col].astype(str).str.replace('✓', 'X')
-
-        # Calculate column width
-        col_width = pdf.w / len(df_pdf.columns)
         
-        # Add header row 1 (Dates)
-        pdf.set_font("Arial", "B", size=9)
-        for header_val in header_row1:
-            pdf.cell(col_width, 6, str(header_val)[:12], border=1, align="C")
-        pdf.ln()
+        # Build table data with headers
+        table_data = [header_row1, header_row2, header_row3]
+        for idx, row in df_pdf.iterrows():
+            row_data = [str(row["Sr. No."]), row["Supervisor Name"]]
+            for col in df_pdf.columns[2:]:
+                row_data.append(str(row[col])[:10])
+            table_data.append(row_data)
         
-        # Add header row 2 (M/E)
-        for header_val in header_row2:
-            pdf.cell(col_width, 6, str(header_val)[:12], border=1, align="C")
-        pdf.ln()
+        # Create table
+        table = Table(table_data, colWidths=[0.6*inch if i < 2 else 0.35*inch for i in range(len(df_pdf.columns))])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 2), '#1e3c72'),
+            ('TEXTCOLOR', (0, 0), (-1, 2), 'white'),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 2), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 2), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, 2), 4),
+            ('GRID', (0, 0), (-1, -1), 0.5, 'black'),
+            ('FONTSIZE', (0, 3), (-1, -1), 7),
+            ('ROWBACKGROUNDS', (0, 3), (-1, -1), ['white', '#f0f0f0']),
+        ]))
+        story.append(table)
         
-        # Add header row 3 (Time slots)
-        for header_val in header_row3:
-            pdf.cell(col_width, 6, str(header_val)[:12], border=1, align="C")
-        pdf.ln()
-
-        # Add table data
-        pdf.set_font("Arial", size=9)
-        for i in range(len(df_pdf)):
-            for j in range(len(df_pdf.columns)):
-                cell_value = str(df_pdf.iloc[i, j])[:12]
-                # Ensure all characters are latin-1 compatible
-                try:
-                    cell_value.encode('latin-1')
-                except UnicodeEncodeError:
-                    cell_value = '?'
-                pdf.cell(col_width, 6, cell_value, border=1, align="C")
-            pdf.ln()
-
-        # Save PDF to bytes buffer - use output() without arguments to get bytes
-        pdf_bytes = pdf.output()
+        # Build PDF
+        doc.build(story)
+        pdf_buffer.seek(0)
         
         st.download_button(
             label="Download PDF",
-            data=pdf_bytes,
+            data=pdf_buffer.getvalue(),
             file_name="supervision_chart.pdf",
             mime="application/pdf"
         )
