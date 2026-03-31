@@ -186,23 +186,18 @@ if st.button("Generate Chart"):
         total_slots = len(date_range) * len(time_slots)
         num_faculty = len(faculty_list)
         
-        # Determine how many faculty per slot needed to use all faculty
-        faculty_per_slot = max(1, (num_faculty + total_slots - 1) // total_slots)  # Ceiling division
-        
-        # Create assignment mapping: {faculty_name: {(date, slot_idx): True}}
-        faculty_assignments = {}
+        # Create assignment mapping: rotating through faculty
+        faculty_assignments = {}  # {faculty_name: [(date1, slot_idx1), (date2, slot_idx2), ...]}
         faculty_index = 0
         
-        # Assign faculty to slots
-        for day_idx, exam_date in enumerate(date_range):
-            for slot_idx, slot in enumerate(time_slots):
-                for fp in range(faculty_per_slot):
-                    if faculty_index < num_faculty:
-                        assigned_faculty = faculty_list[faculty_index]
-                        if assigned_faculty not in faculty_assignments:
-                            faculty_assignments[assigned_faculty] = {}
-                        faculty_assignments[assigned_faculty][(exam_date, slot_idx)] = True
-                        faculty_index += 1
+        # Assign faculty by rotating through all available slots
+        for exam_date in date_range:
+            for slot_idx in range(len(time_slots)):
+                assigned_faculty = faculty_list[faculty_index % num_faculty]
+                if assigned_faculty not in faculty_assignments:
+                    faculty_assignments[assigned_faculty] = []
+                faculty_assignments[assigned_faculty].append((exam_date, slot_idx))
+                faculty_index += 1
         
         # Create one row per faculty with all assignment slots
         data = []
@@ -214,15 +209,16 @@ if st.button("Generate Chart"):
             
             # Add columns for each date-slot combination
             for exam_date in date_range:
-                for slot_idx, slot in enumerate(time_slots):
+                for slot_idx in range(len(time_slots)):
                     is_morning = slot_idx < morning_blocks
                     period = "M" if is_morning else "E"
+                    slot_time = time_slots[slot_idx] if slot_idx < len(time_slots) else ""
                     
                     # Create column name with date, M/E, and slot timing
-                    col_name = f"{exam_date.strftime('%d-%m-%Y')}_{period}_{slot}"
+                    col_name = f"{exam_date.strftime('%d-%m-%Y')}_{period}_{slot_time}"
                     
                     # Check assignment
-                    if faculty_name in faculty_assignments and (exam_date, slot_idx) in faculty_assignments[faculty_name]:
+                    if (exam_date, slot_idx) in faculty_assignments.get(faculty_name, []):
                         row[col_name] = "✓"
                     else:
                         row[col_name] = ""
@@ -247,7 +243,7 @@ if st.button("Generate Chart"):
         for exam_date in date_range:
             date_str = exam_date.strftime("%d-%m-%Y")
             # Morning columns
-            for slot_idx in range(morning_blocks):
+            for slot_idx in range(min(morning_blocks, len(time_slots))):
                 header_row1.append(date_str)
                 header_row2.append("M")
                 header_row3.append(time_slots[slot_idx])
