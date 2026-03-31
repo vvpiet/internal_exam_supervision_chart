@@ -231,7 +231,7 @@ if st.button("Generate Chart"):
         st.subheader(f"Supervision Chart ({exam_start_date.strftime('%d-%m-%Y')} to {exam_end_date.strftime('%d-%m-%Y')})")
         total_exam_days = (exam_end_date - exam_start_date).days + 1
         st.write(f"**Total Days in Range:** {total_exam_days} | **Exam Days (after excluding {len(holidays)} holidays):** {len(date_range)} | **Time Slots/Day:** {len(time_slots)} | **Total Supervision Slots:** {total_slots}")
-        st.write(f"**Total Faculty:** {num_faculty} | **Faculty per Slot:** {faculty_per_slot} | **Faculty Allocated:** {faculty_index}")
+        st.write(f"**Total Faculty:** {num_faculty} | **Faculty Allocation:** Rotational (each faculty assigned to {total_slots // num_faculty + (1 if total_slots % num_faculty != 0 else 0)} slots)")
         st.dataframe(df, use_container_width=True)
 
         # Prepare data for exports with custom headers
